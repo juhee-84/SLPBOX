@@ -37,8 +37,8 @@
         /* PDF 상세 내용 2단 레이아웃용 (JS에서 동적 제어) */
         .pdf-detail-content-area-columns {
             columns: 2;
-            column-gap: 10mm;
-            width: auto;
+            column-gap: 10mm; /* Adjust as needed */
+            width: auto; /* Or 100% depending on parent */
         }
         .response-item-pdf, .break-inside-avoid {
             page-break-inside: avoid !important;
@@ -162,7 +162,6 @@
           };
 
           return (
-            // max-w-md에서 max-w-2xl로 변경하여 다른 컴포넌트와 너비 일치
             <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
               <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">학생 인적 사항</h2>
               <div className="mb-4">
@@ -279,7 +278,7 @@
 
         const Results = ({ personalInfo, responses, onRestart, wordDataFromApp }) => {
           const resultsSummaryRef = useRef();
-          const resultsDetailRef = useRef();
+          const resultsDetailRef = useRef(); 
 
           const calculateSectionStats = (sectionWords, thresholdPercentage) => {
             const totalCount = sectionWords.length;
@@ -303,79 +302,211 @@
             const stats = calculateSectionStats(irregularRules[rule], 90);
             return { rule, status: stats.status, correctCount: stats.correctCount, totalCount: stats.totalCount };
           });
+          
+          const generateOverallSummaryText = () => {
+            let summaryParts = [];
+            let strengths = [];
+            let weaknesses = [];
+
+            if (meaningRegularNoFinalConsonantStats.status === '습득') strengths.push("받침 없는 규칙 단어"); else weaknesses.push("받침 없는 규칙 단어");
+            if (meaningRegularWithFinalConsonantStats.status === '습득') strengths.push("받침 있는 규칙 단어"); else weaknesses.push("받침 있는 규칙 단어");
+
+            const irregularAcquiredCount = irregularResults.filter(r => r.status === '습득').length;
+            const irregularTotalCount = irregularResults.length;
+            if (irregularTotalCount > 0) {
+                if (irregularAcquiredCount === irregularTotalCount) strengths.push("모든 음운 변동 규칙");
+                else {
+                    irregularResults.forEach(r => {
+                        if (r.status === '습득') strengths.push(`${r.rule} 규칙`);
+                        else weaknesses.push(`${r.rule} 규칙`);
+                    });
+                }
+            }
+
+            if (weaknesses.length === 0 && strengths.length > 0) {
+                summaryParts.push(`전반적으로 모든 평가 영역에서 우수한 단어 인지 능력을 보였습니다.`);
+            } else {
+                if (strengths.length > 0) summaryParts.push(`다음 영역에서 강점을 보입니다: ${strengths.join(', ')}.`);
+                if (weaknesses.length > 0) summaryParts.push(`다음 영역에서 추가적인 지도 및 연습이 권장됩니다: ${weaknesses.join(', ')}.`);
+            }
+            if (summaryParts.length === 0) return "평가 결과를 바탕으로 아동의 읽기 능력을 분석해주세요.";
+            return summaryParts.join(" ");
+          };
+
 
           const generatePdf = async () => {
             if (!window.html2canvas || !window.jspdf) {
-              console.error("html2canvas or jspdf not loaded.");
-              alert("PDF 내보내기 라이브러리가 로드되지 않았습니다.");
-              return;
+              alert("PDF 내보내기 라이브러리가 로드되지 않았습니다."); return;
             }
+            const summaryInput = resultsSummaryRef.current; 
+            const detailSectionContainer = resultsDetailRef.current; 
+            const detailContentArea = detailSectionContainer.querySelector('.pdf-detail-content-area');
 
-            const summaryInput = resultsSummaryRef.current;
-            const detailContainer = resultsDetailRef.current;
-            const detailContentElement = detailContainer.querySelector('.pdf-detail-content-area');
 
-            if (!summaryInput || !detailContainer || !detailContentElement) {
-              console.error("PDF content sections not found.");
-              alert("PDF 생성에 필요한 요소를 찾을 수 없습니다.");
-              return;
+            if (!summaryInput || !detailSectionContainer || !detailContentArea) {
+              alert("PDF 생성에 필요한 요소를 찾을 수 없습니다."); return;
             }
+            
+            // Capture original style *before* try block
+            const originalDetailContentAreaStyle = detailContentArea.style.cssText;
 
             document.querySelectorAll('.no-print').forEach(btn => btn.style.display = 'none');
+            const pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
+            const pdfPageWidth = pdf.internal.pageSize.getWidth();
+            const pdfPageHeight = pdf.internal.pageSize.getHeight();
+            const margin = 10;
+            const contentPdfWidth = pdfPageWidth - (2 * margin);
+            const contentPdfHeightOnPage = pdfPageHeight - (2 * margin);
+            const html2canvasBaseOptions = { 
+                scale: 1.5, 
+                useCORS: true, 
+                logging: false, 
+                scrollY: 0, 
+            };
+            let currentPage = 1;
+            const maxPages = 4;
+            let yPositionOnPdf = margin; 
 
             try {
-              const pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
-              const pdfPageWidth = pdf.internal.pageSize.getWidth();
-              const pdfPageHeight = pdf.internal.pageSize.getHeight();
-              const margin = 10;
-              const contentPdfWidth = pdfPageWidth - (2 * margin);
-              const contentPdfHeightOnPage = pdfPageHeight - (2 * margin);
-              const html2canvasOptionsBase = { scale: 1.5, useCORS: true, logging: false };
+                // 1. 요약 정보 캡처 및 첫 페이지에 추가
+                const summaryCanvas = await window.html2canvas(summaryInput, {
+                    ...html2canvasBaseOptions, 
+                    width: summaryInput.scrollWidth,
+                    height: summaryInput.scrollHeight
+                });
+                const summaryImgData = summaryCanvas.toDataURL('image/png');
+                let summaryImgHeightInPdf = summaryCanvas.height * (contentPdfWidth / summaryCanvas.width);
+                
+                if (summaryImgHeightInPdf > contentPdfHeightOnPage) { 
+                    pdf.addImage(summaryImgData, 'PNG', margin, margin, contentPdfWidth, contentPdfHeightOnPage);
+                    summaryImgHeightInPdf = contentPdfHeightOnPage; 
+                    if (currentPage < maxPages) {
+                        pdf.addPage();
+                        currentPage++;
+                        yPositionOnPdf = margin; 
+                    } else {
+                         pdf.setPage(maxPages);
+                         pdf.setFontSize(10); pdf.setTextColor(100);
+                         const truncatedMsg = "... (요약 내용이 너무 길어 일부만 표시됩니다) ...";
+                         const textWidth = pdf.getStringUnitWidth(truncatedMsg) * pdf.getFontSize() / pdf.internal.scaleFactor;
+                         pdf.text(truncatedMsg, (pdfPageWidth - textWidth) / 2, contentPdfHeightOnPage + margin - 5);
+                         pdf.save(`읽기검사결과_${personalInfo.name || '아동'}_${new Date().toLocaleDateString('ko-KR').replace(/\s/g, '')}.pdf`);
+                         document.querySelectorAll('.no-print').forEach(btn => btn.style.display = '');
+                         return;
+                    }
+                } else {
+                    pdf.addImage(summaryImgData, 'PNG', margin, margin, contentPdfWidth, summaryImgHeightInPdf);
+                }
+                
+                if (currentPage < maxPages) { 
+                    if (currentPage === 1) { 
+                        pdf.addPage();
+                        currentPage++;
+                    }
+                } else if (currentPage >= maxPages && summaryImgHeightInPdf >= contentPdfHeightOnPage) { 
+                    pdf.save(`읽기검사결과_${personalInfo.name || '아동'}_${new Date().toLocaleDateString('ko-KR').replace(/\s/g, '')}.pdf`);
+                    document.querySelectorAll('.no-print').forEach(btn => btn.style.display = '');
+                    return;
+                }
+                yPositionOnPdf = margin; 
 
-              const canvasSummary = await window.html2canvas(summaryInput, {...html2canvasOptionsBase, windowWidth: summaryInput.scrollWidth, windowHeight: summaryInput.scrollHeight});
-              const imgDataSummary = canvasSummary.toDataURL('image/png');
-              const summaryImgHeightInPdfUnits = canvasSummary.height * (contentPdfWidth / canvasSummary.width);
-              pdf.addImage(imgDataSummary, 'PNG', margin, margin, contentPdfWidth, summaryImgHeightInPdfUnits);
 
-              const originalDetailContentStyle = detailContentElement.style.cssText;
-              detailContentElement.style.columns = "2";
-              detailContentElement.style.columnGap = "10mm";
-              detailContentElement.style.width = "auto";
-              
-              await new Promise(resolve => setTimeout(resolve, 100));
+                // 2단 레이아웃을 위해 임시 스타일 적용
+                detailContentArea.style.columns = '2';
+                detailContentArea.style.columnGap = '8mm'; 
+                detailContentArea.style.width = '100%'; 
+                
+                await new Promise(resolve => setTimeout(resolve, 50));
 
-              const canvasDetail = await window.html2canvas(detailContainer, {...html2canvasOptionsBase, windowWidth: detailContainer.scrollWidth, windowHeight: detailContainer.scrollHeight });
-              detailContentElement.style.cssText = originalDetailContentStyle;
-              
-              const imgDataDetail = canvasDetail.toDataURL('image/png');
-              const detailImageActualHeight = canvasDetail.height;
+                const detailCanvas = await window.html2canvas(detailSectionContainer, {
+                    ...html2canvasBaseOptions,
+                    width: detailSectionContainer.scrollWidth, 
+                    height: detailSectionContainer.scrollHeight 
+                });
 
-              if (detailImageActualHeight > 5) {
-                pdf.addPage();
-                const scaleX = contentPdfWidth / canvasDetail.width;
-                const scaleY = contentPdfHeightOnPage / canvasDetail.height;
-                const scaleToFitOnePage = Math.min(scaleX, scaleY);
-                const pdfImgWidth = canvasDetail.width * scaleToFitOnePage;
-                const pdfImgHeight = canvasDetail.height * scaleToFitOnePage;
-                const xPos = margin + (contentPdfWidth - pdfImgWidth) / 2;
-                const yPos = margin + (contentPdfHeightOnPage - pdfImgHeight) / 2;
-                pdf.addImage(imgDataDetail, 'PNG', xPos, yPos, pdfImgWidth, pdfImgHeight);
-              }
-              pdf.save(`읽기검사결과_${personalInfo.name || '아동'}_${new Date().toLocaleDateString('ko-KR').replace(/\s/g, '')}.pdf`);
+                // 스타일 복원 (캡처 후 즉시)
+                // 이 줄은 finally 블록에서도 실행되지만, 여기서 먼저 실행하여 UI를 빠르게 복원합니다.
+                // generatePdf 함수 가장 바깥쪽 finally 블록에서 한 번 더 복원하여 오류 발생 시에도 확실히 복원되도록 합니다.
+                // detailContentArea.style.cssText = originalDetailContentAreaStyle; // 중복될 수 있으므로 finally에서만 처리
+
+                const detailImgOriginalWidth = detailCanvas.width;
+                const detailImgOriginalHeight = detailCanvas.height;
+                const pdfImageWidth = contentPdfWidth;
+
+                let currentYInOriginalImagePx = 0; 
+
+                while (currentYInOriginalImagePx < detailImgOriginalHeight && currentPage <= maxPages) {
+                    let availableHeightOnPdfPage = contentPdfHeightOnPage - yPositionOnPdf;
+
+                    if (availableHeightOnPdfPage <= 0) { 
+                        if (currentPage >= maxPages) break; 
+                        pdf.addPage();
+                        currentPage++;
+                        yPositionOnPdf = margin; 
+                        availableHeightOnPdfPage = contentPdfHeightOnPage - yPositionOnPdf;
+                    }
+
+                    let heightToDrawFromOriginalPx = availableHeightOnPdfPage * (detailImgOriginalWidth / pdfImageWidth);
+                    heightToDrawFromOriginalPx = Math.min(heightToDrawFromOriginalPx, detailImgOriginalHeight - currentYInOriginalImagePx);
+
+                    if (heightToDrawFromOriginalPx <= 0) break;
+                    
+                    const actualChunkHeightOnPdf = heightToDrawFromOriginalPx * (pdfImageWidth / detailImgOriginalWidth);
+
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = detailImgOriginalWidth;
+                    tempCanvas.height = heightToDrawFromOriginalPx;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.drawImage(detailCanvas, 0, currentYInOriginalImagePx, detailImgOriginalWidth, heightToDrawFromOriginalPx, 0, 0, detailImgOriginalWidth, heightToDrawFromOriginalPx);
+                    const croppedImgData = tempCanvas.toDataURL('image/png');
+
+                    pdf.addImage(croppedImgData, 'PNG', margin, yPositionOnPdf, pdfImageWidth, actualChunkHeightOnPdf);
+
+                    currentYInOriginalImagePx += heightToDrawFromOriginalPx;
+                    yPositionOnPdf += actualChunkHeightOnPdf + 2; 
+                }
+
+                if (currentYInOriginalImagePx < detailImgOriginalHeight && currentPage >= maxPages) {
+                    pdf.setPage(maxPages); 
+                    pdf.setFontSize(10);
+                    pdf.setTextColor(100);
+                    const truncatedMsg = "... (내용이 많아 일부만 표시됩니다) ...";
+                    const textWidth = pdf.getStringUnitWidth(truncatedMsg) * pdf.getFontSize() / pdf.internal.scaleFactor;
+                    pdf.text(truncatedMsg, (pdfPageWidth - textWidth) / 2, contentPdfHeightOnPage + margin - 5);
+                }
+
+                pdf.save(`읽기검사결과_${personalInfo.name || '아동'}_${new Date().toLocaleDateString('ko-KR').replace(/\s/g, '')}.pdf`);
             } catch (error) {
-              console.error("Error generating PDF:", error);
-              alert("PDF 생성 중 오류 발생: " + error.message);
+                console.error("Error generating PDF:", error);
+                alert("PDF 생성 중 오류 발생: " + error.message);
             } finally {
-              document.querySelectorAll('.no-print').forEach(btn => btn.style.display = '');
+                document.querySelectorAll('.no-print').forEach(btn => btn.style.display = '');
+                if (detailContentArea) { // detailContentArea가 유효한지 확인 후 스타일 복원
+                    detailContentArea.style.cssText = originalDetailContentAreaStyle;
+                }
             }
           };
-
+          
           const renderResponseItem = (word, index) => {
             const response = responses[word.id];
-            if (!response || (response.isCorrect === undefined && (!response.notes || response.notes.trim() === ''))) return null;
-            const responseText = response.isCorrect === true ? '정반응' : (response.isCorrect === false ? '오반응' : '반응 기록 없음');
-            const responseColor = response.isCorrect === true ? 'text-green-700' : (response.isCorrect === false ? 'text-red-700' : 'text-gray-500');
-            const notesExist = response.notes && response.notes.trim() !== '';
+            let responseText = '미응답'; 
+            let responseColor = 'text-gray-500';
+            const notesExist = response && response.notes && response.notes.trim() !== '';
+
+            if (response && typeof response.isCorrect === 'boolean') {
+                if (response.isCorrect) {
+                    responseText = '정반응';
+                    responseColor = 'text-green-700';
+                } else {
+                    responseText = '오반응';
+                    responseColor = 'text-red-700';
+                }
+            } else if (notesExist) { 
+                responseText = '반응 기록 없음 (노트만 있음)';
+            } else { 
+                return null; 
+            }
+
             return (
               <div key={word.id} className="p-3 bg-gray-100 rounded-lg shadow-sm text-sm break-words response-item-pdf">
                 <p className="text-gray-800 leading-relaxed">
@@ -392,76 +523,84 @@
 
           return (
             <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
-              <div>
-                <div ref={resultsSummaryRef}>
-                  <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">검사 결과</h2>
-                  <div className="mb-6 border-b pb-4">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-2">학생 정보</h3>
-                    <p className="text-gray-600"><strong>이름:</strong> {personalInfo.name || '미입력'}</p>
-                    <p className="text-gray-600"><strong>학년:</strong> {personalInfo.grade || '미입력'}학년</p>
-                  </div>
-                  <div className="mb-6">
-                    <h3 className="text-xl font-semibold text-gray-700 mb-3">영역별 습득 여부 (요약)</h3>
-                    <div className="space-y-3">
-                      <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
-                        <span className="font-medium text-gray-700">의미 규칙 단어 (받침 없는 단어)</span>
-                        <span className={`font-bold ${meaningRegularNoFinalConsonantStats.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
-                          {meaningRegularNoFinalConsonantStats.status} ({meaningRegularNoFinalConsonantStats.correctCount}/{meaningRegularNoFinalConsonantStats.totalCount})
-                        </span>
-                      </div>
-                      <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
-                        <span className="font-medium text-gray-700">의미 규칙 단어 (받침 있는 단어)</span>
-                        <span className={`font-bold ${meaningRegularWithFinalConsonantStats.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
-                          {meaningRegularWithFinalConsonantStats.status} ({meaningRegularWithFinalConsonantStats.correctCount}/{meaningRegularWithFinalConsonantStats.totalCount})
-                        </span>
-                      </div>
-                      <div className="bg-blue-50 p-3 rounded-lg">
-                        <span className="font-medium text-gray-700 block mb-2">의미 불규칙 단어 (음운 변동 규칙별)</span>
-                        <ul className="list-disc list-inside space-y-2 ml-4">
-                          {irregularResults.map((res, index) => (
-                            <li key={index} className="flex justify-between items-center">
-                              <span className="text-gray-600">{res.rule}</span>
-                              <span className={`font-bold ${res.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
-                                {res.status} ({res.correctCount}/{res.totalCount})
-                              </span>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    </div>
-                  </div>
+              {/* 요약 정보 (학생 정보, 영역별 습득 여부, 종합 코멘트) */}
+              <div ref={resultsSummaryRef}>
+                <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">검사 결과</h2>
+                <div className="mb-6 border-b pb-4">
+                  <h3 className="text-xl font-semibold text-gray-700 mb-2">학생 정보</h3>
+                  <p className="text-gray-600"><strong>이름:</strong> {personalInfo.name || '미입력'}</p>
+                  <p className="text-gray-600"><strong>학년:</strong> {personalInfo.grade || '미입력'}학년</p>
                 </div>
-                <div ref={resultsDetailRef} className="mt-8 pt-6 border-t">
-                  <h3 className="text-2xl font-semibold text-gray-800 mb-4 text-center">문항별 상세 반응 기록</h3>
-                  <div className="pdf-detail-content-area">
-                    <div className="mb-6 break-inside-avoid">
-                      <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 규칙 단어 (받침 없는 단어)</h4>
-                      <div className="space-y-2">
-                        {wordDataFromApp.meaningRegularNoFinalConsonant.map((word, index) => renderResponseItem(word, index)).filter(item => item !== null)}
-                      </div>
+
+                <div className="mb-6 p-4 bg-yellow-50 rounded-lg">
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">종합 요약</h3>
+                  <p className="text-gray-600">{generateOverallSummaryText()}</p>
+                </div>
+
+                <div className="mb-6">
+                  <h3 className="text-xl font-semibold text-gray-700 mb-3">영역별 습득 여부</h3>
+                  <div className="space-y-3">
+                    <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
+                      <span className="font-medium text-gray-700">의미 규칙 단어 (받침 없는 단어)</span>
+                      <span className={`font-bold ${meaningRegularNoFinalConsonantStats.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
+                        {meaningRegularNoFinalConsonantStats.status} ({meaningRegularNoFinalConsonantStats.correctCount}/{meaningRegularNoFinalConsonantStats.totalCount})
+                      </span>
                     </div>
-                    <div className="mb-6 break-inside-avoid">
-                      <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 규칙 단어 (받침 있는 단어)</h4>
-                      <div className="space-y-2">
-                        {wordDataFromApp.meaningRegularWithFinalConsonant.map((word, index) => renderResponseItem(word, index)).filter(item => item !== null)}
-                      </div>
+                    <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
+                      <span className="font-medium text-gray-700">의미 규칙 단어 (받침 있는 단어)</span>
+                      <span className={`font-bold ${meaningRegularWithFinalConsonantStats.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
+                        {meaningRegularWithFinalConsonantStats.status} ({meaningRegularWithFinalConsonantStats.correctCount}/{meaningRegularWithFinalConsonantStats.totalCount})
+                      </span>
                     </div>
-                    <div className="mb-6 break-inside-avoid">
-                      <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 불규칙 단어 (음운 변동 규칙별)</h4>
-                      {Object.entries(irregularRules).map(([rule, wordsInSection]) => {
-                        const renderedItems = wordsInSection.map((word, index) => renderResponseItem(word, index)).filter(item => item !== null);
-                        if (renderedItems.length === 0) return null;
-                        return (
-                          <div key={rule} className="mb-4 break-inside-avoid">
-                            <h5 className="text-lg font-medium text-gray-600 mb-2">{rule}</h5>
-                            <div className="space-y-2 ml-2 sm:ml-4">{renderedItems}</div>
-                          </div>
-                        );
-                      })}
+                    <div className="bg-blue-50 p-3 rounded-lg">
+                      <span className="font-medium text-gray-700 block mb-2">의미 불규칙 단어 (음운 변동 규칙별)</span>
+                      <ul className="list-disc list-inside space-y-2 ml-4">
+                        {irregularResults.map((res, index) => (
+                          <li key={index} className="flex justify-between items-center">
+                            <span className="text-gray-600">{res.rule}</span>
+                            <span className={`font-bold ${res.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
+                              {res.status} ({res.correctCount}/{res.totalCount})
+                            </span>
+                          </li>
+                        ))}
+                      </ul>
                     </div>
                   </div>
                 </div>
               </div>
+              
+              {/* 문항별 상세 반응 기록 (이 div 전체가 detailSectionInput으로 캡처됨) */}
+              <div ref={resultsDetailRef} className="mt-8 pt-6 border-t">
+                <h3 className="text-2xl font-semibold text-gray-800 mb-4 text-center no-print-pdf-title">문항별 상세 반응 기록</h3>
+                <div className="pdf-detail-content-area"> {/* 실제 목록 내용 */}
+                  <div className="mb-6 break-inside-avoid">
+                    <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 규칙 단어 (받침 없는 단어)</h4>
+                    <div className="space-y-2">
+                      {wordDataFromApp.meaningRegularNoFinalConsonant.map((word, index) => renderResponseItem(word, index)).filter(Boolean)}
+                    </div>
+                  </div>
+                  <div className="mb-6 break-inside-avoid">
+                    <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 규칙 단어 (받침 있는 단어)</h4>
+                    <div className="space-y-2">
+                      {wordDataFromApp.meaningRegularWithFinalConsonant.map((word, index) => renderResponseItem(word, index)).filter(Boolean)}
+                    </div>
+                  </div>
+                  <div className="mb-6 break-inside-avoid">
+                    <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 불규칙 단어 (음운 변동 규칙별)</h4>
+                    {Object.entries(irregularRules).map(([rule, wordsInSection]) => {
+                      const renderedItems = wordsInSection.map((word, index) => renderResponseItem(word, index)).filter(Boolean);
+                      if (renderedItems.length === 0) return null; 
+                      return (
+                        <div key={rule} className="mb-4 break-inside-avoid">
+                          <h5 className="text-lg font-medium text-gray-600 mb-2">{rule}</h5>
+                          <div className="space-y-2 ml-2 sm:ml-4">{renderedItems}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
               <div className="flex flex-col space-y-4 mt-8 no-print">
                 <button onClick={generatePdf} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg">PDF 파일로 내보내기</button>
                 <button onClick={onRestart} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">새로운 검사 시작 (검사 종료)</button>
@@ -512,188 +651,95 @@
           const [pastAssessments, setPastAssessments] = useState([]);
           const [selectedPastAssessment, setSelectedPastAssessment] = useState(null);
 
-          const currentWordData = wordData; // 전역 wordData 사용
+          const currentWordData = wordData; 
 
-          // Firebase 초기화 및 인증 상태 변경 리스너 설정
           useEffect(() => {
-            // HTML에서 이미 선언된 전역 변수 사용
             const firebaseConfigJson = JSON.parse(__firebase_config_str || '{}');
-            
             if (Object.keys(firebaseConfigJson).length === 0 && !firebase.apps.length) {
                  console.warn("Firebase config is empty. Firebase will not be initialized.");
-                 setFirebaseInitialized(true); // Firebase 없이 진행하도록 설정
-                 setUserId(crypto.randomUUID()); // 임시 사용자 ID
+                 setFirebaseInitialized(true); 
+                 setUserId(crypto.randomUUID()); 
                  return;
             }
-
-
             try {
-                if (!firebase.apps.length) {
-                    firebase.initializeApp(firebaseConfigJson);
-                    console.log("Firebase initialized with compat libraries.");
-                } else {
-                    firebase.app(); // 이미 초기화된 경우 기본 앱 가져오기
-                    console.log("Firebase already initialized.");
-                }
+                if (!firebase.apps.length) firebase.initializeApp(firebaseConfigJson);
+                else firebase.app();
+                
+                firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION)
+                 .then(() => __initial_auth_token ? firebase.auth().signInWithCustomToken(__initial_auth_token) : firebase.auth().signInAnonymously())
+                 .then(uc => setUserId(uc && uc.user ? uc.user.uid : crypto.randomUUID()))
+                 .catch(err => {
+                    console.error("Firebase Auth Error:", err);
+                    firebase.auth().signInAnonymously().then(uc => setUserId(uc && uc.user ? uc.user.uid : crypto.randomUUID())).catch(() => setUserId(crypto.randomUUID()));
+                 }).finally(() => setFirebaseInitialized(true));
 
-                firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION) // 세션 기반 지속성
-                 .then(() => {
-                    console.log("Firebase auth persistence set to session.");
-                    // 기존 토큰으로 로그인 시도 또는 익명 로그인
-                    if (__initial_auth_token) {
-                        return firebase.auth().signInWithCustomToken(__initial_auth_token);
-                    } else {
-                        return firebase.auth().signInAnonymously();
-                    }
-                 })
-                .then((userCredential) => {
-                    if (userCredential && userCredential.user) {
-                         console.log("User signed in:", userCredential.user.uid);
-                         setUserId(userCredential.user.uid);
-                    } else {
-                         console.log("User is not signed in after attempt, using random ID.");
-                         setUserId(crypto.randomUUID());
-                    }
-                    setFirebaseInitialized(true);
-                })
-                .catch((error) => {
-                    console.error("Firebase Auth Error:", error);
-                    // 오류 발생 시 익명으로라도 처리 시도 (또는 오류 상태 관리)
-                    firebase.auth().signInAnonymously().then(uc => {
-                        if (uc && uc.user) setUserId(uc.user.uid); else setUserId(crypto.randomUUID());
-                        console.log("Signed in anonymously after error or if no token.");
-                    }).catch(anonError => {
-                        console.error("Anonymous sign-in failed:", anonError);
-                        setUserId(crypto.randomUUID()); // 최후의 수단
-                    }).finally(() => {
-                         setFirebaseInitialized(true);
-                    });
-                });
-
-                // 인증 상태 변경 감지
-                const unsubscribeAuth = firebase.auth().onAuthStateChanged((user) => {
-                    if (user) {
-                        console.log("Auth state changed, user:", user.uid);
-                        setUserId(user.uid);
-                    } else {
-                        console.log("Auth state changed, no user. Using previous or random ID.");
-                        // userId가 이미 설정되어 있다면 (초기 로그인 시도에서), 그대로 두거나 필요시 업데이트
-                        if (!userId) setUserId(crypto.randomUUID());
-                    }
-                });
-                return () => unsubscribeAuth();
-
+                const unsubAuth = firebase.auth().onAuthStateChanged(u => setUserId(u ? u.uid : (userId || crypto.randomUUID())));
+                return () => unsubAuth();
             } catch (error) {
                 console.error("Firebase initialization error:", error);
                 setUserId(crypto.randomUUID());
-                setFirebaseInitialized(true); // 오류 발생 시에도 앱은 계속 진행
+                setFirebaseInitialized(true); 
             }
-          }, []); // firebaseInitialized 제거, 최초 1회만 실행
+          }, []); 
 
 
-          // 과거 검사 결과 불러오기
           useEffect(() => {
             if (firebaseInitialized && userId && firebase.apps.length && firebase.firestore) {
               const db = firebase.firestore();
               const assessmentsCollectionPath = `artifacts/${__app_id}/users/${userId}/assessments`;
-              console.log(`Listening to assessments at: ${assessmentsCollectionPath}`);
-              
-              const unsubscribe = db.collection(assessmentsCollectionPath)
-                .orderBy("timestamp", "desc") // timestamp 필드로 정렬 (Firestore에서 색인 필요)
-                .onSnapshot((snapshot) => {
-                  const assessmentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                  setPastAssessments(assessmentsData);
-                  console.log("Past assessments loaded:", assessmentsData.length);
-                }, (error) => {
-                  console.error(`Error fetching past assessments from ${assessmentsCollectionPath}:`, error);
-                });
+              const unsubscribe = db.collection(assessmentsCollectionPath).orderBy("timestamp", "desc")
+                .onSnapshot(snapshot => setPastAssessments(snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }))),
+                error => console.error(`Error fetching:`, error));
               return () => unsubscribe();
             }
           }, [firebaseInitialized, userId]);
 
           const saveAssessment = async () => {
             if (!firebaseInitialized || !userId || !firebase.apps.length || !firebase.firestore) {
-              alert("데이터베이스에 연결되지 않아 저장할 수 없습니다.");
-              return false;
+              alert("데이터베이스에 연결되지 않아 저장할 수 없습니다."); return false;
             }
             const db = firebase.firestore();
             const assessmentToSave = { personalInfo, responses, timestamp: firebase.firestore.FieldValue.serverTimestamp() };
-            const assessmentsCollectionPath = `artifacts/${__app_id}/users/${userId}/assessments`;
+            const path = `artifacts/${__app_id}/users/${userId}/assessments`;
             try {
-              await db.collection(assessmentsCollectionPath).add(assessmentToSave);
-              alert("검사 결과가 성공적으로 저장되었습니다.");
-              return true;
+              await db.collection(path).add(assessmentToSave);
+              alert("검사 결과가 성공적으로 저장되었습니다."); return true;
             } catch (e) {
-              console.error(`Error adding document to ${assessmentsCollectionPath}: `, e);
-              alert(`저장 중 오류가 발생했습니다: ${e.message}`);
-              return false;
+              alert(`저장 중 오류: ${e.message}`); return false;
             }
           };
 
-          const handleNextStep = () => {
-            if (step === 4) saveAssessment();
-            setStep((prev) => prev + 1);
-          };
-          const handlePreviousStep = () => setStep((prev) => prev - 1);
-          const handleRestart = () => {
-            setStep(0);
-            setPersonalInfo({ name: '', grade: '' });
-            setResponses({});
-            setSelectedPastAssessment(null);
-          };
-          const handleViewPastAssessment = (assessment) => {
-            setSelectedPastAssessment(assessment);
-            setStep(7);
-          };
-          const handleBackToHome = () => {
-            setStep(0);
-            setSelectedPastAssessment(null);
-            setPersonalInfo({ name: '', grade: '' });
-            setResponses({});
-          };
+          const handleNextStep = () => { if (step === 4) saveAssessment(); setStep(prev => prev + 1); };
+          const handlePreviousStep = () => setStep(prev => prev - 1);
+          const handleRestart = () => { setStep(0); setPersonalInfo({ name: '', grade: '' }); setResponses({}); setSelectedPastAssessment(null); };
+          const handleViewPastAssessment = (assessment) => { setSelectedPastAssessment(assessment); setStep(7); };
+          const handleBackToHome = () => { setStep(0); setSelectedPastAssessment(null); setPersonalInfo({ name: '', grade: '' }); setResponses({}); };
 
           const renderStepContent = () => {
-            // firebaseInitialized 상태와 관계없이 step 0 (소개)는 항상 렌더링 시도
-            // Firebase 의존 기능은 각 컴포넌트 또는 로직 내부에서 firebaseInitialized 확인 후 처리
             switch (step) {
               case 0: return <Introduction onStart={() => {
-                        if (!firebaseInitialized && Object.keys(JSON.parse(__firebase_config_str || '{}')).length > 0) { // Firebase 설정이 있는데 아직 초기화 안된 경우
-                            alert("도구가 아직 로딩 중입니다. 잠시 후 다시 시도해주세요.");
-                            return;
-                        }
-                        handleNextStep();
-                    }} />;
+                        if (!firebaseInitialized && Object.keys(JSON.parse(__firebase_config_str || '{}')).length > 0) { 
+                            alert("도구가 아직 로딩 중입니다. 잠시 후 다시 시도해주세요."); return;
+                        } handleNextStep(); }} />;
               case 1: return <PersonalInfo personalInfo={personalInfo} setPersonalInfo={setPersonalInfo} onNext={handleNextStep} />;
               case 2: return <WordSection title="의미 규칙 단어 (받침 없는 단어)" description="모음 및 자음 인식 능력을 확인합니다." words={currentWordData.meaningRegularNoFinalConsonant} responses={responses} setResponses={setResponses} onNext={handleNextStep} onPrevious={handlePreviousStep} />;
               case 3: return <WordSection title="의미 규칙 단어 (받침 있는 단어)" description="받침 있는 단어의 인식 능력을 확인합니다." words={currentWordData.meaningRegularWithFinalConsonant} responses={responses} setResponses={setResponses} onNext={handleNextStep} onPrevious={handlePreviousStep} />;
               case 4: return <WordSection title="의미 불규칙 단어 (음운 변동 규칙)" description="음운 변동 규칙 적용 단어의 인식 능력을 확인합니다." words={currentWordData.meaningIrregular} responses={responses} setResponses={setResponses} onNext={handleNextStep} onPrevious={handlePreviousStep} />;
               case 5: return <Results personalInfo={personalInfo} responses={responses} onRestart={handleRestart} wordDataFromApp={currentWordData} />;
               case 6: return <PastAssessmentsList pastAssessments={pastAssessments} onViewAssessment={handleViewPastAssessment} onBackToHome={handleBackToHome} />;
-              case 7:
-                if (selectedPastAssessment) return <Results personalInfo={selectedPastAssessment.personalInfo} responses={selectedPastAssessment.responses} onRestart={handleBackToHome} wordDataFromApp={currentWordData} />;
-                handleBackToHome(); return null;
+              case 7: if (selectedPastAssessment) return <Results personalInfo={selectedPastAssessment.personalInfo} responses={selectedPastAssessment.responses} onRestart={handleBackToHome} wordDataFromApp={currentWordData} />;
+                        handleBackToHome(); return null;
               default: return <Introduction onStart={handleNextStep} />;
             }
           };
           
-          // 초기 로딩 메시지 핸들링: Firebase 설정이 있고, 아직 초기화 안됐으며, 첫 화면이 아닐 때만 로딩 메시지 표시
           if (Object.keys(JSON.parse(__firebase_config_str || '{}')).length > 0 && !firebaseInitialized && step !== 0) {
              return <div className="loading-message">검사 도구를 불러오는 중입니다... (Firebase 초기화 대기)</div>;
           }
 
-
-          return (
-            // #root div에 직접 p-4 클래스를 적용하여 전체 컨텐츠 영역에 패딩을 줍니다.
-            // style 태그의 #root padding: 1rem; 와 중복될 수 있으므로, Tailwind 클래스로 통일하거나 CSS를 조정합니다.
-            // 여기서는 Tailwind 클래스를 우선시하여 CSS의 padding은 제거하거나 주석처리하는 것이 좋습니다.
-            // App 컴포넌트 최상위 div에 min-h-screen 등을 적용하는 대신 #root에서 처리하도록 합니다.
-            <React.Fragment> 
-              {renderStepContent()}
-            </React.Fragment>
-          );
+          return <React.Fragment>{renderStepContent()}</React.Fragment>;
         };
 
-        // --- React 앱 렌더링 ---
         ReactDOM.render(<App />, document.getElementById('root'));
     </script>
 </body>
