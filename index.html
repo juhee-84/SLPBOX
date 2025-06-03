@@ -1,0 +1,700 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>초등 읽기 비공식 검사 도구</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@17/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@17/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.9.0/firebase-firestore-compat.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+
+    <style>
+        /* Custom CSS (style.css 내용에 해당) */
+        body {
+            font-family: 'Inter', sans-serif; /* Tailwind 기본 폰트와 유사하게 설정 */
+            margin: 0;
+            min-height: 100vh;
+            background-color: #f0f4f8; /* 기본 배경색 */
+        }
+        #root {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 1rem; /* 전체적인 패딩 추가하여 화면 가장자리에 붙는 것 방지 */
+        }
+        /* PDF 출력 시 특정 요소 숨기기 */
+        .no-print {
+            /* Tailwind 클래스로 제어하므로 여기서는 특별히 필요 없을 수 있음 */
+        }
+        /* PDF 상세 내용 2단 레이아웃용 (JS에서 동적 제어) */
+        .pdf-detail-content-area-columns {
+            columns: 2;
+            column-gap: 10mm;
+            width: auto;
+        }
+        .response-item-pdf, .break-inside-avoid {
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+        }
+        /* 로딩 메시지 스타일 */
+        .loading-message {
+            text-align: center;
+            font-size: 1.25rem; /* text-xl */
+            color: #4a5568; /* text-gray-700 */
+            padding: 2rem; /* p-8 */
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div id="root">
+        <div class="loading-message">검사 도구를 불러오는 중입니다...</div>
+    </div>
+
+    <script>
+        // 이 값들은 실제 Canvas 환경에서 제공되는 값으로 대체되어야 합니다.
+        // 개발/테스트 목적으로 임시 값을 사용할 수 있습니다.
+        var __app_id = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id-html';
+        var __firebase_config_str = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+        var __initial_auth_token = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+    </script>
+
+    <script type="text/babel">
+        // =============== JavaScript (script.js 내용에 해당) ===============
+
+        // --- wordData (기존 React 코드에서 가져옴) ---
+        const wordData = {
+          meaningRegularNoFinalConsonant: [
+            { id: 'mrnfc1', word: '나무', pronunciation: '나-무' }, { id: 'mrnfc2', word: '바다', pronunciation: '바-다' },
+            { id: 'mrnfc3', word: '고기', pronunciation: '고-기' }, { id: 'mrnfc4', word: '소리', pronunciation: '소-리' },
+            { id: 'mrnfc5', word: '새우', pronunciation: '새-우' }, { id: 'mrnfc6', word: '포도', pronunciation: '포-도' },
+            { id: 'mrnfc7', word: '가위', pronunciation: '가-위' }, { id: 'mrnfc8', word: '모자', pronunciation: '모-자' },
+            { id: 'mrnfc9', word: '치마', pronunciation: '치-마' }, { id: 'mrnfc10', word: '오리', pronunciation: '오-리' },
+          ],
+          meaningRegularWithFinalConsonant: [
+            { id: 'mrwfc1', word: '연필', pronunciation: '연-필' }, { id: 'mrwfc2', word: '운동', pronunciation: '운-동' },
+            { id: 'mrwfc3', word: '신발', pronunciation: '신-발' }, { id: 'mrwfc4', word: '공책', pronunciation: '공-책' },
+            { id: 'mrwfc5', word: '연극', pronunciation: '연-극' }, { id: 'mrwfc6', word: '창문', pronunciation: '창-문' },
+            { id: 'mrwfc7', word: '선물', pronunciation: '선-물' }, { id: 'mrwfc8', word: '식탁', pronunciation: '식-탁' },
+            { id: 'mrwfc9', word: '점심', pronunciation: '점-심' }, { id: 'mrwfc10', word: '풍선', pronunciation: '풍-선' },
+          ],
+          meaningIrregular: [
+            { id: 'mi1', rule: '음절의 끝소리 규칙', word: '밖', pronunciation: '[박]' }, { id: 'mi2', rule: '음절의 끝소리 규칙', word: '낮', pronunciation: '[낟]' },
+            { id: 'mi3', rule: '음절의 끝소리 규칙', word: '솥', pronunciation: '[솓]' }, { id: 'mi4', rule: '음절의 끝소리 규칙', word: '부엌', pronunciation: '[부억]' },
+            { id: 'mi5', rule: '음절의 끝소리 규칙', word: '옷', pronunciation: '[옫]' }, { id: 'mi6', rule: '자음동화', word: '신라', pronunciation: '[실라]' },
+            { id: 'mi7', rule: '자음동화', word: '국물', pronunciation: '[궁물]' }, { id: 'mi8', rule: '자음동화', word: '독립', pronunciation: '[동닙]' },
+            { id: 'mi9', rule: '자음동화', word: '백마', pronunciation: '[뱅마]' }, { id: 'mi10', rule: '자음동화', word: '닫는', pronunciation: '[단는]' },
+            { id: 'mi11', rule: '구개음화', word: '같이', pronunciation: '[가치]' }, { id: 'mi12', rule: '구개음화', word: '굳이', pronunciation: '[구지]' },
+            { id: 'mi13', rule: '구개음화', word: '해돋이', pronunciation: '[해도지]' }, { id: 'mi14', rule: '구개음화', word: '밭이', pronunciation: '[바치]' },
+            { id: 'mi15', rule: '구개음화', word: '미닫이', pronunciation: '[미다지]' }, { id: 'mi16', rule: '경음화', word: '국밥', pronunciation: '[국빱]' },
+            { id: 'mi17', rule: '경음화', word: '학교', pronunciation: '[학꾜]' }, { id: 'mi18', rule: '경음화', word: '책상', pronunciation: '[책쌍]' },
+            { id: 'mi19', rule: '경음화', word: '덮개', pronunciation: '[덥깨]' }, { id: 'mi20', rule: '경음화', word: '읽고', pronunciation: '[일꼬]' },
+            { id: 'mi21', rule: 'ㄴ첨가', word: '솜이불', pronunciation: '[솜니불]' }, { id: 'mi22', rule: 'ㄴ첨가', word: '막일', pronunciation: '[망닐]' },
+            { id: 'mi23', rule: 'ㄴ첨가', word: '내복약', pronunciation: '[내봉냑]' }, { id: 'mi24', rule: 'ㄴ첨가', word: '한여름', pronunciation: '[한녀름]' },
+            { id: 'mi25', rule: 'ㄴ첨가', word: '담요', pronunciation: '[담뇨]' }, { id: 'mi26', rule: 'ㅎ탈락', word: '좋아', pronunciation: '[조아]' },
+            { id: 'mi27', rule: 'ㅎ탈락', word: '많이', pronunciation: '[마니]' }, { id: 'mi28', rule: 'ㅎ탈락', word: '놓아', pronunciation: '[노아]' },
+            { id: 'mi29', rule: 'ㅎ탈락', word: '쌓아', pronunciation: '[싸아]' }, { id: 'mi30', rule: 'ㅎ탈락', word: '닿아', pronunciation: '[다아]' },
+            { id: 'mi31', rule: '자음 축약', word: '놓고', pronunciation: '[노코]' }, { id: 'mi32', rule: '자음 축약', word: '좋지', pronunciation: '[조치]' },
+            { id: 'mi33', rule: '자음 축약', word: '입학', pronunciation: '[이팍]' }, { id: 'mi34', rule: '자음 축약', word: '좁히다', pronunciation: '[조피다]' },
+            { id: 'mi35', rule: '자음 축약', word: '각하', pronunciation: '[가카]' }, { id: 'mi41', rule: '자음군 단순화', word: '닭', pronunciation: '[닥]' },
+            { id: 'mi42', rule: '자음군 단순화', word: '값', pronunciation: '[갑]' }, { id: 'mi43', rule: '자음군 단순화', word: '읽다', pronunciation: '[익따]' },
+            { id: 'mi44', rule: '자음군 단순화', word: '앉다', pronunciation: '[안따]' }, { id: 'mi45', rule: '자음군 단순화', word: '몫', pronunciation: '[목]' },
+          ],
+        };
+
+        // --- React 컴포넌트들 (기존 코드에서 가져옴) ---
+        const { useState, useEffect, useRef } = React;
+
+        // Introduction component
+        const Introduction = ({ onStart }) => {
+          return (
+            <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
+              <h2 className="text-3xl font-bold text-gray-800 mb-4 text-center">읽기 비공식 검사 도구</h2>
+              <div className="text-gray-700 space-y-4 mb-8">
+                <p>
+                  이 도구는 초등학교 1~3학년 아동의 비공식적인 읽기 능력을 평가하기 위해 제작되었습니다.
+                  세 가지 주요 영역(의미 규칙 단어 - 받침 없는 단어, 의미 규칙 단어 - 받침 있는 단어, 의미 불규칙 단어)으로
+                  구성되어 있으며, 각 영역별로 아동의 단어인지 능력을 확인할 수 있습니다.
+                </p>
+                <h3 className="text-xl font-semibold text-gray-800 mt-6">검사 목적</h3>
+                <ul className="list-disc list-inside ml-4 space-y-1">
+                  <li>아동의 모음 및 자음 인식 능력 확인</li>
+                  <li>받침 있는 단어의 정확한 읽기 능력 평가</li>
+                  <li>다양한 음운 변동 규칙이 적용된 단어의 읽기 능력 진단</li>
+                </ul>
+                <h3 className="text-xl font-semibold text-gray-800 mt-6">적용 및 해석 방법</h3>
+                <ul className="list-disc list-inside ml-4 space-y-1">
+                  <li>
+                    <strong>검사 진행:</strong> 각 단어를 아동에게 제시하고, 아동이 단어를 읽는 것을 관찰합니다.
+                    '정반응' 또는 '오반응'을 체크하고, 아동의 실제 발음이나 특이 사항을 '아동 반응 기록' 칸에 기록합니다.
+                  </li>
+                  <li>
+                    <strong>결과 산출:</strong> 모든 문항 90% 이상 수행 시 '습득'으로 결과가 자동 산출됩니다.
+                  </li>
+                  <li>
+                    <strong>결과 활용:</strong> 산출된 결과를 바탕으로 아동이 어떤 읽기 영역에서 강점과 약점을 가지고 있는지 파악할 수 있습니다.
+                    '미습득'으로 판정된 영역은 추가적인 개입이나 지도가 필요함을 의미합니다.
+                  </li>
+                </ul>
+              </div>
+              <button
+                onClick={onStart}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition duration-200 ease-in-out transform hover:scale-105"
+              >
+                검사 시작하기
+              </button>
+            </div>
+          );
+        };
+
+        const PersonalInfo = ({ personalInfo, setPersonalInfo, onNext }) => {
+          const handleChange = (e) => {
+            const { name, value } = e.target;
+            setPersonalInfo((prev) => ({ ...prev, [name]: value }));
+          };
+
+          return (
+            // max-w-md에서 max-w-2xl로 변경하여 다른 컴포넌트와 너비 일치
+            <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
+              <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">학생 인적 사항</h2>
+              <div className="mb-4">
+                <label htmlFor="name" className="block text-gray-700 text-sm font-semibold mb-2">이름:</label>
+                <input
+                  type="text"
+                  id="name"
+                  name="name"
+                  value={personalInfo.name}
+                  onChange={handleChange}
+                  className="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="학생의 이름을 입력하세요"
+                />
+              </div>
+              <div className="mb-6">
+                <label htmlFor="grade" className="block text-gray-700 text-sm font-semibold mb-2">학년:</label>
+                <input
+                  type="number"
+                  id="grade"
+                  name="grade"
+                  value={personalInfo.grade}
+                  onChange={handleChange}
+                  min="1"
+                  max="3"
+                  className="shadow-sm appearance-none border rounded-lg w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-400"
+                  placeholder="학년을 입력하세요 (1-3)"
+                />
+              </div>
+              <button
+                onClick={onNext}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition duration-200 ease-in-out transform hover:scale-105"
+              >
+                검사 진행
+              </button>
+            </div>
+          );
+        };
+
+        const WordSection = ({ title, description, words, responses, setResponses, onNext, onPrevious }) => {
+          const handleResponseChange = (id, type, value) => {
+            setResponses((prev) => ({
+              ...prev,
+              [id]: {
+                ...prev[id],
+                [type]: value,
+              },
+            }));
+          };
+
+          return (
+            <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
+              <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">{title}</h2>
+              <p className="text-gray-600 mb-6 text-center">{description}</p>
+              <div className="space-y-4">
+                {words.map((item, index) => (
+                  <div key={item.id} className="flex flex-col p-4 bg-gray-50 rounded-lg shadow-sm">
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-2">
+                      <div className="flex-grow flex items-center w-full sm:w-auto mb-2 sm:mb-0">
+                        <span className="text-lg font-bold text-gray-700 mr-3">{index + 1}.</span>
+                        <span className="text-xl font-semibold text-gray-900">{item.word}</span>
+                        {item.rule && <span className="text-sm text-gray-500 ml-2">({item.rule})</span>}
+                        <span className="text-sm text-gray-500 ml-2">({item.pronunciation})</span>
+                      </div>
+                      <div className="flex items-center space-x-3 self-start sm:self-center">
+                        <label className="inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="form-checkbox h-5 w-5 text-green-600 rounded-md focus:ring-green-500"
+                            checked={responses[item.id]?.isCorrect === true}
+                            onChange={() => handleResponseChange(item.id, 'isCorrect', true)}
+                          />
+                          <span className="ml-2 text-gray-700">정반응</span>
+                        </label>
+                        <label className="inline-flex items-center cursor-pointer">
+                          <input
+                            type="checkbox"
+                            className="form-checkbox h-5 w-5 text-red-600 rounded-md focus:ring-red-500"
+                            checked={responses[item.id]?.isCorrect === false}
+                            onChange={() => handleResponseChange(item.id, 'isCorrect', false)}
+                          />
+                          <span className="ml-2 text-gray-700">오반응</span>
+                        </label>
+                      </div>
+                    </div>
+                    <textarea
+                      value={responses[item.id]?.notes || ''}
+                      onChange={(e) => handleResponseChange(item.id, 'notes', e.target.value)}
+                      placeholder="아동 반응 기록 (예: '나모'라고 읽음)"
+                      rows="1"
+                      className="mt-2 p-2 border border-gray-300 rounded-md w-full text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 resize-none"
+                    ></textarea>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-between mt-8">
+                {onPrevious && (
+                  <button
+                    onClick={onPrevious}
+                    className="bg-gray-300 hover:bg-gray-400 text-gray-800 font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-gray-400 focus:ring-opacity-75 transition duration-200 ease-in-out transform hover:scale-105"
+                  >
+                    이전
+                  </button>
+                )}
+                <button
+                  onClick={onNext}
+                  className="ml-auto bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:ring-opacity-75 transition duration-200 ease-in-out transform hover:scale-105"
+                >
+                  다음
+                </button>
+              </div>
+            </div>
+          );
+        };
+
+        const Results = ({ personalInfo, responses, onRestart, wordDataFromApp }) => {
+          const resultsSummaryRef = useRef();
+          const resultsDetailRef = useRef();
+
+          const calculateSectionStats = (sectionWords, thresholdPercentage) => {
+            const totalCount = sectionWords.length;
+            if (totalCount === 0) return { status: '데이터 없음', correctCount: 0, totalCount: 0 };
+            const correctCount = sectionWords.filter(word => responses[word.id]?.isCorrect === true).length;
+            const percentage = (correctCount / totalCount) * 100;
+            const status = percentage >= thresholdPercentage ? '습득' : '미습득';
+            return { status, correctCount, totalCount };
+          };
+
+          const meaningRegularNoFinalConsonantStats = calculateSectionStats(wordDataFromApp.meaningRegularNoFinalConsonant, 90);
+          const meaningRegularWithFinalConsonantStats = calculateSectionStats(wordDataFromApp.meaningRegularWithFinalConsonant, 90);
+
+          const irregularRules = {};
+          wordDataFromApp.meaningIrregular.forEach(word => {
+            if (!irregularRules[word.rule]) irregularRules[word.rule] = [];
+            irregularRules[word.rule].push(word);
+          });
+
+          const irregularResults = Object.keys(irregularRules).map(rule => {
+            const stats = calculateSectionStats(irregularRules[rule], 90);
+            return { rule, status: stats.status, correctCount: stats.correctCount, totalCount: stats.totalCount };
+          });
+
+          const generatePdf = async () => {
+            if (!window.html2canvas || !window.jspdf) {
+              console.error("html2canvas or jspdf not loaded.");
+              alert("PDF 내보내기 라이브러리가 로드되지 않았습니다.");
+              return;
+            }
+
+            const summaryInput = resultsSummaryRef.current;
+            const detailContainer = resultsDetailRef.current;
+            const detailContentElement = detailContainer.querySelector('.pdf-detail-content-area');
+
+            if (!summaryInput || !detailContainer || !detailContentElement) {
+              console.error("PDF content sections not found.");
+              alert("PDF 생성에 필요한 요소를 찾을 수 없습니다.");
+              return;
+            }
+
+            document.querySelectorAll('.no-print').forEach(btn => btn.style.display = 'none');
+
+            try {
+              const pdf = new window.jspdf.jsPDF('p', 'mm', 'a4');
+              const pdfPageWidth = pdf.internal.pageSize.getWidth();
+              const pdfPageHeight = pdf.internal.pageSize.getHeight();
+              const margin = 10;
+              const contentPdfWidth = pdfPageWidth - (2 * margin);
+              const contentPdfHeightOnPage = pdfPageHeight - (2 * margin);
+              const html2canvasOptionsBase = { scale: 1.5, useCORS: true, logging: false };
+
+              const canvasSummary = await window.html2canvas(summaryInput, {...html2canvasOptionsBase, windowWidth: summaryInput.scrollWidth, windowHeight: summaryInput.scrollHeight});
+              const imgDataSummary = canvasSummary.toDataURL('image/png');
+              const summaryImgHeightInPdfUnits = canvasSummary.height * (contentPdfWidth / canvasSummary.width);
+              pdf.addImage(imgDataSummary, 'PNG', margin, margin, contentPdfWidth, summaryImgHeightInPdfUnits);
+
+              const originalDetailContentStyle = detailContentElement.style.cssText;
+              detailContentElement.style.columns = "2";
+              detailContentElement.style.columnGap = "10mm";
+              detailContentElement.style.width = "auto";
+              
+              await new Promise(resolve => setTimeout(resolve, 100));
+
+              const canvasDetail = await window.html2canvas(detailContainer, {...html2canvasOptionsBase, windowWidth: detailContainer.scrollWidth, windowHeight: detailContainer.scrollHeight });
+              detailContentElement.style.cssText = originalDetailContentStyle;
+              
+              const imgDataDetail = canvasDetail.toDataURL('image/png');
+              const detailImageActualHeight = canvasDetail.height;
+
+              if (detailImageActualHeight > 5) {
+                pdf.addPage();
+                const scaleX = contentPdfWidth / canvasDetail.width;
+                const scaleY = contentPdfHeightOnPage / canvasDetail.height;
+                const scaleToFitOnePage = Math.min(scaleX, scaleY);
+                const pdfImgWidth = canvasDetail.width * scaleToFitOnePage;
+                const pdfImgHeight = canvasDetail.height * scaleToFitOnePage;
+                const xPos = margin + (contentPdfWidth - pdfImgWidth) / 2;
+                const yPos = margin + (contentPdfHeightOnPage - pdfImgHeight) / 2;
+                pdf.addImage(imgDataDetail, 'PNG', xPos, yPos, pdfImgWidth, pdfImgHeight);
+              }
+              pdf.save(`읽기검사결과_${personalInfo.name || '아동'}_${new Date().toLocaleDateString('ko-KR').replace(/\s/g, '')}.pdf`);
+            } catch (error) {
+              console.error("Error generating PDF:", error);
+              alert("PDF 생성 중 오류 발생: " + error.message);
+            } finally {
+              document.querySelectorAll('.no-print').forEach(btn => btn.style.display = '');
+            }
+          };
+
+          const renderResponseItem = (word, index) => {
+            const response = responses[word.id];
+            if (!response || (response.isCorrect === undefined && (!response.notes || response.notes.trim() === ''))) return null;
+            const responseText = response.isCorrect === true ? '정반응' : (response.isCorrect === false ? '오반응' : '반응 기록 없음');
+            const responseColor = response.isCorrect === true ? 'text-green-700' : (response.isCorrect === false ? 'text-red-700' : 'text-gray-500');
+            const notesExist = response.notes && response.notes.trim() !== '';
+            return (
+              <div key={word.id} className="p-3 bg-gray-100 rounded-lg shadow-sm text-sm break-words response-item-pdf">
+                <p className="text-gray-800 leading-relaxed">
+                  <span className="font-semibold">{index + 1}. {word.word}</span>
+                  <span className="text-gray-600"> ({word.pronunciation})</span>
+                  {word.rule && <span className="text-xs text-blue-600 ml-1">[{word.rule}]</span>}
+                  <span className="mx-1">-</span>
+                  학생 반응: <span className={`font-medium ${responseColor}`}>{responseText}</span>
+                  {notesExist && <span className="text-gray-600"> (기록: {response.notes.trim()})</span>}
+                </p>
+              </div>
+            );
+          };
+
+          return (
+            <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
+              <div>
+                <div ref={resultsSummaryRef}>
+                  <h2 className="text-3xl font-bold text-gray-800 mb-6 text-center">검사 결과</h2>
+                  <div className="mb-6 border-b pb-4">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-2">학생 정보</h3>
+                    <p className="text-gray-600"><strong>이름:</strong> {personalInfo.name || '미입력'}</p>
+                    <p className="text-gray-600"><strong>학년:</strong> {personalInfo.grade || '미입력'}학년</p>
+                  </div>
+                  <div className="mb-6">
+                    <h3 className="text-xl font-semibold text-gray-700 mb-3">영역별 습득 여부 (요약)</h3>
+                    <div className="space-y-3">
+                      <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
+                        <span className="font-medium text-gray-700">의미 규칙 단어 (받침 없는 단어)</span>
+                        <span className={`font-bold ${meaningRegularNoFinalConsonantStats.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
+                          {meaningRegularNoFinalConsonantStats.status} ({meaningRegularNoFinalConsonantStats.correctCount}/{meaningRegularNoFinalConsonantStats.totalCount})
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center bg-blue-50 p-3 rounded-lg">
+                        <span className="font-medium text-gray-700">의미 규칙 단어 (받침 있는 단어)</span>
+                        <span className={`font-bold ${meaningRegularWithFinalConsonantStats.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
+                          {meaningRegularWithFinalConsonantStats.status} ({meaningRegularWithFinalConsonantStats.correctCount}/{meaningRegularWithFinalConsonantStats.totalCount})
+                        </span>
+                      </div>
+                      <div className="bg-blue-50 p-3 rounded-lg">
+                        <span className="font-medium text-gray-700 block mb-2">의미 불규칙 단어 (음운 변동 규칙별)</span>
+                        <ul className="list-disc list-inside space-y-2 ml-4">
+                          {irregularResults.map((res, index) => (
+                            <li key={index} className="flex justify-between items-center">
+                              <span className="text-gray-600">{res.rule}</span>
+                              <span className={`font-bold ${res.status === '습득' ? 'text-green-600' : 'text-red-600'}`}>
+                                {res.status} ({res.correctCount}/{res.totalCount})
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div ref={resultsDetailRef} className="mt-8 pt-6 border-t">
+                  <h3 className="text-2xl font-semibold text-gray-800 mb-4 text-center">문항별 상세 반응 기록</h3>
+                  <div className="pdf-detail-content-area">
+                    <div className="mb-6 break-inside-avoid">
+                      <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 규칙 단어 (받침 없는 단어)</h4>
+                      <div className="space-y-2">
+                        {wordDataFromApp.meaningRegularNoFinalConsonant.map((word, index) => renderResponseItem(word, index)).filter(item => item !== null)}
+                      </div>
+                    </div>
+                    <div className="mb-6 break-inside-avoid">
+                      <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 규칙 단어 (받침 있는 단어)</h4>
+                      <div className="space-y-2">
+                        {wordDataFromApp.meaningRegularWithFinalConsonant.map((word, index) => renderResponseItem(word, index)).filter(item => item !== null)}
+                      </div>
+                    </div>
+                    <div className="mb-6 break-inside-avoid">
+                      <h4 className="text-xl font-semibold text-gray-700 mb-3">의미 불규칙 단어 (음운 변동 규칙별)</h4>
+                      {Object.entries(irregularRules).map(([rule, wordsInSection]) => {
+                        const renderedItems = wordsInSection.map((word, index) => renderResponseItem(word, index)).filter(item => item !== null);
+                        if (renderedItems.length === 0) return null;
+                        return (
+                          <div key={rule} className="mb-4 break-inside-avoid">
+                            <h5 className="text-lg font-medium text-gray-600 mb-2">{rule}</h5>
+                            <div className="space-y-2 ml-2 sm:ml-4">{renderedItems}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex flex-col space-y-4 mt-8 no-print">
+                <button onClick={generatePdf} className="w-full bg-purple-600 hover:bg-purple-700 text-white font-bold py-2 px-4 rounded-lg">PDF 파일로 내보내기</button>
+                <button onClick={onRestart} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg">새로운 검사 시작 (검사 종료)</button>
+              </div>
+            </div>
+          );
+        };
+
+        const PastAssessmentsList = ({ pastAssessments, onViewAssessment, onBackToHome }) => {
+          return (
+            <div className="p-6 bg-white rounded-xl shadow-lg w-full max-w-2xl mx-auto my-8">
+              <h2 className="text-2xl font-bold text-gray-800 mb-6 text-center">이전 검사 결과 목록</h2>
+              {pastAssessments.length === 0 ? (
+                <p className="text-center text-gray-600">저장된 검사 결과가 없습니다.</p>
+              ) : (
+                <ul className="space-y-3">
+                  {pastAssessments.map((assessment) => (
+                    <li
+                      key={assessment.id}
+                      className="p-4 bg-gray-50 rounded-lg shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center cursor-pointer hover:bg-gray-100 transition duration-150 ease-in-out"
+                      onClick={() => onViewAssessment(assessment)}
+                    >
+                      <div className="mb-2 sm:mb-0">
+                        <p className="font-semibold text-gray-800">
+                          {assessment.personalInfo?.name || '알 수 없는 아동'} ({assessment.personalInfo?.grade || '?'}학년)
+                        </p>
+                        <p className="text-sm text-gray-500">
+                          검사일: {assessment.timestamp ? new Date(assessment.timestamp.toDate()).toLocaleDateString('ko-KR') : '날짜 미상'}
+                        </p>
+                      </div>
+                      <span className="text-blue-600 font-medium self-end sm:self-center">상세 보기 &gt;</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <button onClick={onBackToHome} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg mt-8">홈으로 돌아가기</button>
+            </div>
+          );
+        };
+
+        // --- 메인 App 컴포넌트 ---
+        const App = () => {
+          const [step, setStep] = useState(0);
+          const [personalInfo, setPersonalInfo] = useState({ name: '', grade: '' });
+          const [responses, setResponses] = useState({});
+          const [firebaseInitialized, setFirebaseInitialized] = useState(false);
+          const [userId, setUserId] = useState(null);
+          const [pastAssessments, setPastAssessments] = useState([]);
+          const [selectedPastAssessment, setSelectedPastAssessment] = useState(null);
+
+          const currentWordData = wordData; // 전역 wordData 사용
+
+          // Firebase 초기화 및 인증 상태 변경 리스너 설정
+          useEffect(() => {
+            // HTML에서 이미 선언된 전역 변수 사용
+            const firebaseConfigJson = JSON.parse(__firebase_config_str || '{}');
+            
+            if (Object.keys(firebaseConfigJson).length === 0 && !firebase.apps.length) {
+                 console.warn("Firebase config is empty. Firebase will not be initialized.");
+                 setFirebaseInitialized(true); // Firebase 없이 진행하도록 설정
+                 setUserId(crypto.randomUUID()); // 임시 사용자 ID
+                 return;
+            }
+
+
+            try {
+                if (!firebase.apps.length) {
+                    firebase.initializeApp(firebaseConfigJson);
+                    console.log("Firebase initialized with compat libraries.");
+                } else {
+                    firebase.app(); // 이미 초기화된 경우 기본 앱 가져오기
+                    console.log("Firebase already initialized.");
+                }
+
+                firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION) // 세션 기반 지속성
+                 .then(() => {
+                    console.log("Firebase auth persistence set to session.");
+                    // 기존 토큰으로 로그인 시도 또는 익명 로그인
+                    if (__initial_auth_token) {
+                        return firebase.auth().signInWithCustomToken(__initial_auth_token);
+                    } else {
+                        return firebase.auth().signInAnonymously();
+                    }
+                 })
+                .then((userCredential) => {
+                    if (userCredential && userCredential.user) {
+                         console.log("User signed in:", userCredential.user.uid);
+                         setUserId(userCredential.user.uid);
+                    } else {
+                         console.log("User is not signed in after attempt, using random ID.");
+                         setUserId(crypto.randomUUID());
+                    }
+                    setFirebaseInitialized(true);
+                })
+                .catch((error) => {
+                    console.error("Firebase Auth Error:", error);
+                    // 오류 발생 시 익명으로라도 처리 시도 (또는 오류 상태 관리)
+                    firebase.auth().signInAnonymously().then(uc => {
+                        if (uc && uc.user) setUserId(uc.user.uid); else setUserId(crypto.randomUUID());
+                        console.log("Signed in anonymously after error or if no token.");
+                    }).catch(anonError => {
+                        console.error("Anonymous sign-in failed:", anonError);
+                        setUserId(crypto.randomUUID()); // 최후의 수단
+                    }).finally(() => {
+                         setFirebaseInitialized(true);
+                    });
+                });
+
+                // 인증 상태 변경 감지
+                const unsubscribeAuth = firebase.auth().onAuthStateChanged((user) => {
+                    if (user) {
+                        console.log("Auth state changed, user:", user.uid);
+                        setUserId(user.uid);
+                    } else {
+                        console.log("Auth state changed, no user. Using previous or random ID.");
+                        // userId가 이미 설정되어 있다면 (초기 로그인 시도에서), 그대로 두거나 필요시 업데이트
+                        if (!userId) setUserId(crypto.randomUUID());
+                    }
+                });
+                return () => unsubscribeAuth();
+
+            } catch (error) {
+                console.error("Firebase initialization error:", error);
+                setUserId(crypto.randomUUID());
+                setFirebaseInitialized(true); // 오류 발생 시에도 앱은 계속 진행
+            }
+          }, []); // firebaseInitialized 제거, 최초 1회만 실행
+
+
+          // 과거 검사 결과 불러오기
+          useEffect(() => {
+            if (firebaseInitialized && userId && firebase.apps.length && firebase.firestore) {
+              const db = firebase.firestore();
+              const assessmentsCollectionPath = `artifacts/${__app_id}/users/${userId}/assessments`;
+              console.log(`Listening to assessments at: ${assessmentsCollectionPath}`);
+              
+              const unsubscribe = db.collection(assessmentsCollectionPath)
+                .orderBy("timestamp", "desc") // timestamp 필드로 정렬 (Firestore에서 색인 필요)
+                .onSnapshot((snapshot) => {
+                  const assessmentsData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                  setPastAssessments(assessmentsData);
+                  console.log("Past assessments loaded:", assessmentsData.length);
+                }, (error) => {
+                  console.error(`Error fetching past assessments from ${assessmentsCollectionPath}:`, error);
+                });
+              return () => unsubscribe();
+            }
+          }, [firebaseInitialized, userId]);
+
+          const saveAssessment = async () => {
+            if (!firebaseInitialized || !userId || !firebase.apps.length || !firebase.firestore) {
+              alert("데이터베이스에 연결되지 않아 저장할 수 없습니다.");
+              return false;
+            }
+            const db = firebase.firestore();
+            const assessmentToSave = { personalInfo, responses, timestamp: firebase.firestore.FieldValue.serverTimestamp() };
+            const assessmentsCollectionPath = `artifacts/${__app_id}/users/${userId}/assessments`;
+            try {
+              await db.collection(assessmentsCollectionPath).add(assessmentToSave);
+              alert("검사 결과가 성공적으로 저장되었습니다.");
+              return true;
+            } catch (e) {
+              console.error(`Error adding document to ${assessmentsCollectionPath}: `, e);
+              alert(`저장 중 오류가 발생했습니다: ${e.message}`);
+              return false;
+            }
+          };
+
+          const handleNextStep = () => {
+            if (step === 4) saveAssessment();
+            setStep((prev) => prev + 1);
+          };
+          const handlePreviousStep = () => setStep((prev) => prev - 1);
+          const handleRestart = () => {
+            setStep(0);
+            setPersonalInfo({ name: '', grade: '' });
+            setResponses({});
+            setSelectedPastAssessment(null);
+          };
+          const handleViewPastAssessment = (assessment) => {
+            setSelectedPastAssessment(assessment);
+            setStep(7);
+          };
+          const handleBackToHome = () => {
+            setStep(0);
+            setSelectedPastAssessment(null);
+            setPersonalInfo({ name: '', grade: '' });
+            setResponses({});
+          };
+
+          const renderStepContent = () => {
+            // firebaseInitialized 상태와 관계없이 step 0 (소개)는 항상 렌더링 시도
+            // Firebase 의존 기능은 각 컴포넌트 또는 로직 내부에서 firebaseInitialized 확인 후 처리
+            switch (step) {
+              case 0: return <Introduction onStart={() => {
+                        if (!firebaseInitialized && Object.keys(JSON.parse(__firebase_config_str || '{}')).length > 0) { // Firebase 설정이 있는데 아직 초기화 안된 경우
+                            alert("도구가 아직 로딩 중입니다. 잠시 후 다시 시도해주세요.");
+                            return;
+                        }
+                        handleNextStep();
+                    }} />;
+              case 1: return <PersonalInfo personalInfo={personalInfo} setPersonalInfo={setPersonalInfo} onNext={handleNextStep} />;
+              case 2: return <WordSection title="의미 규칙 단어 (받침 없는 단어)" description="모음 및 자음 인식 능력을 확인합니다." words={currentWordData.meaningRegularNoFinalConsonant} responses={responses} setResponses={setResponses} onNext={handleNextStep} onPrevious={handlePreviousStep} />;
+              case 3: return <WordSection title="의미 규칙 단어 (받침 있는 단어)" description="받침 있는 단어의 인식 능력을 확인합니다." words={currentWordData.meaningRegularWithFinalConsonant} responses={responses} setResponses={setResponses} onNext={handleNextStep} onPrevious={handlePreviousStep} />;
+              case 4: return <WordSection title="의미 불규칙 단어 (음운 변동 규칙)" description="음운 변동 규칙 적용 단어의 인식 능력을 확인합니다." words={currentWordData.meaningIrregular} responses={responses} setResponses={setResponses} onNext={handleNextStep} onPrevious={handlePreviousStep} />;
+              case 5: return <Results personalInfo={personalInfo} responses={responses} onRestart={handleRestart} wordDataFromApp={currentWordData} />;
+              case 6: return <PastAssessmentsList pastAssessments={pastAssessments} onViewAssessment={handleViewPastAssessment} onBackToHome={handleBackToHome} />;
+              case 7:
+                if (selectedPastAssessment) return <Results personalInfo={selectedPastAssessment.personalInfo} responses={selectedPastAssessment.responses} onRestart={handleBackToHome} wordDataFromApp={currentWordData} />;
+                handleBackToHome(); return null;
+              default: return <Introduction onStart={handleNextStep} />;
+            }
+          };
+          
+          // 초기 로딩 메시지 핸들링: Firebase 설정이 있고, 아직 초기화 안됐으며, 첫 화면이 아닐 때만 로딩 메시지 표시
+          if (Object.keys(JSON.parse(__firebase_config_str || '{}')).length > 0 && !firebaseInitialized && step !== 0) {
+             return <div className="loading-message">검사 도구를 불러오는 중입니다... (Firebase 초기화 대기)</div>;
+          }
+
+
+          return (
+            // #root div에 직접 p-4 클래스를 적용하여 전체 컨텐츠 영역에 패딩을 줍니다.
+            // style 태그의 #root padding: 1rem; 와 중복될 수 있으므로, Tailwind 클래스로 통일하거나 CSS를 조정합니다.
+            // 여기서는 Tailwind 클래스를 우선시하여 CSS의 padding은 제거하거나 주석처리하는 것이 좋습니다.
+            // App 컴포넌트 최상위 div에 min-h-screen 등을 적용하는 대신 #root에서 처리하도록 합니다.
+            <React.Fragment> 
+              {renderStepContent()}
+            </React.Fragment>
+          );
+        };
+
+        // --- React 앱 렌더링 ---
+        ReactDOM.render(<App />, document.getElementById('root'));
+    </script>
+</body>
+</html>
